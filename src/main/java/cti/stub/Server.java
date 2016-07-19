@@ -11,6 +11,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
@@ -23,15 +24,26 @@ public class Server {
     public static final int PORT = 42027;
     private Logger logger = Logger.getLogger(Server.class.getClass().getName());
     private ExecutorService service;
-
+    private Map<String, Object> scenarioInitiateConnection;
+    private Map<String, ClientDescriptor> clients = new ConcurrentHashMap<String, ClientDescriptor>();
 
     //Methods
     public static void main(String[] args) {
         Server s = new Server();
         s.establishThreadPool(3);
+        s.getClients().put("init-connection", new ClientDescriptor());
         if (args.length > 0 && args[0] != null && !args[0].isEmpty())
             s.loadEstablishConnectionScenarioFile(args[0].toString());
         else s.loadEstablishConnectionScenarioFile("/home/user/tmp/scenarios_short1.xml");
+    }
+
+    //Getters and setters
+    public Map<String, ClientDescriptor> getClients() {
+        return clients;
+    }
+
+    public void setClients(Map<String, ClientDescriptor> clients) {
+        this.clients = clients;
     }
 
     /**
@@ -47,15 +59,19 @@ public class Server {
             ssc.socket().bind(new InetSocketAddress(PORT));
             SelectionKey key = ssc.register(selector, SelectionKey.OP_ACCEPT);
 
-
             while (!Thread.currentThread().isInterrupted()) {
                 selector.select();
                 Iterator iterator = selector.selectedKeys().iterator();
-                while(iterator.hasNext()){
+                while (iterator.hasNext()) {
                     SelectionKey selectionKey = (SelectionKey) iterator.next();
                     iterator.remove();
-                    if(selectionKey.isAcceptable()){
+                    if (selectionKey.isAcceptable()) {
                         SocketChannel clientChannel = ssc.accept();
+                        logger.log(Level.FINE, "Connected ".concat(clientChannel.socket().toString()));
+//                        service.submit(new ExecutionThread());
+                        ExecutionThread initThread = new ExecutionThread();
+                        initThread.prepareForExecution(scenarioInitiateConnection,clients.get("init-connection"));
+                        service.execute(initThread);
                     }
                 }
             }
