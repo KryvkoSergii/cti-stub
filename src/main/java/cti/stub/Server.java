@@ -1,5 +1,6 @@
 package cti.stub;
 
+import cti.stub.exceptions.AsyncTransport;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.ParserConfigurationException;
@@ -26,6 +27,7 @@ public class Server {
     private ExecutorService service;
     private Map<String, Object> scenarioInitiateConnection;
     private Map<String, ClientDescriptor> clients = new ConcurrentHashMap<String, ClientDescriptor>();
+    private AsyncTransport stack;
 
     //Methods
     public static void main(String[] args) {
@@ -34,7 +36,13 @@ public class Server {
         s.getClients().put("init-connection", new ClientDescriptor());
         if (args.length > 0 && args[0] != null && !args[0].isEmpty())
             s.loadEstablishConnectionScenarioFile(args[0].toString());
-        else s.loadEstablishConnectionScenarioFile("/home/user/tmp/scenarios_short1.xml");
+        else
+            s.loadEstablishConnectionScenarioFile("/home/srg/java/Idea-WorkSpaces/CTI/connector_test/src/main/resources/scenarios_short1.xml");
+        try {
+            s.connect();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     //Getters and setters
@@ -62,6 +70,7 @@ public class Server {
             while (!Thread.currentThread().isInterrupted()) {
                 selector.select();
                 Iterator iterator = selector.selectedKeys().iterator();
+                System.out.println("Wait");
                 while (iterator.hasNext()) {
                     SelectionKey selectionKey = (SelectionKey) iterator.next();
                     iterator.remove();
@@ -70,7 +79,7 @@ public class Server {
                         logger.log(Level.FINE, "Connected ".concat(clientChannel.socket().toString()));
 //                        service.submit(new ExecutionThread());
                         ExecutionThread initThread = new ExecutionThread();
-                        initThread.prepareForExecution(scenarioInitiateConnection,clients.get("init-connection"));
+                        initThread.prepareForExecution(scenarioInitiateConnection,clients.get("init-connection"),getAsyncStack(clientChannel));
                         service.execute(initThread);
                     }
                 }
@@ -119,5 +128,10 @@ public class Server {
         System.out.println("*****   *******     **   **     **   **     *****       *****     **    *******     **   **");
         System.out.println("*****   *******     **   **     **   **     *****       *****     **    *******     **   **");
 
+    }
+
+    private AsyncTransport getAsyncStack(SocketChannel channel){
+        if (stack==null) return new AsyncTransport(channel);
+        else return stack;
     }
 }

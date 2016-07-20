@@ -1,10 +1,14 @@
 package cti.stub;
 
+import cti.stub.exceptions.AsyncTransport;
 import cti.stub.model.ScenarioPairContainer;
 import cti.stub.model.VariablesDescriptor;
+import org.apache.commons.codec.binary.Hex;
+
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -17,9 +21,12 @@ public class ExecutionThread implements Runnable {
     private Map<String, Object> scenario;
     private Map<String, ClientDescriptor> clients;
     private ClientDescriptor clientDescriptor;
+    private AsyncTransport stack;
 
 
     //Constructors
+    public ExecutionThread() {
+    }
 
 
     //Getters and setters
@@ -38,7 +45,6 @@ public class ExecutionThread implements Runnable {
     public void setClients(Map<String, ClientDescriptor> clients) {
         this.clients = clients;
     }
-
 
     //Methods
     private ScenarioPairContainer getCommand(Map<String, Object> scenario, String[] state, int level) {
@@ -128,144 +134,128 @@ public class ExecutionThread implements Runnable {
         return resultMessage;
     }
 
-    public void prepareForExecution(Map<String, Object> scenario, ClientDescriptor clientDescriptor){
+    public void prepareForExecution(Map<String, Object> scenario, ClientDescriptor clientDescriptor, AsyncTransport stack) {
         this.scenario = scenario;
         this.clientDescriptor = clientDescriptor;
+        this.stack = stack;
     }
 
     @Override
     public void run() {
         logger.log(Level.INFO, String.format("Thread started "));
-        int port = -1;
-        String address = null;
+//        int port = -1;
+//        String address = null;
         long initTime;
 
-        logger.log(Level.INFO, String.format("Defined address %s:%s", address, port));
-        logger.log(Level.INFO, String.format("Accepted %s", clientSocket.getRemoteSocketAddress()));
+//        logger.log(Level.INFO, String.format("Defined address %s:%s", address, port));
+//        logger.log(Level.INFO, String.format("Accepted %s", channel.getRemoteSocketAddress()));
+//
+//        TransportStack stack = new TransportStack(channel);
 
-        TransportStack stack = new TransportStack(clientSocket);
         Queue<byte[]> inputMessages = stack.getInputMessages();
         Queue<byte[]> outputMessages = stack.getOutputMessages();
-        stack.start();
+//        stack.start();
 
         initTime = System.currentTimeMillis();
         byte[] inputMessage = null;
 
-            //разделитель сообщений
-            if (logger.getLevel().intValue() >= Level.INFO.intValue()) System.out.println("");
-            //получение сообщений, в том числе и HEARD_BEAT
+        //разделитель сообщений
+        if (logger.getLevel().intValue() >= Level.INFO.intValue()) System.out.println("");
+        //получение сообщений, в том числе и HEARD_BEAT
 
-            long initTimeLoadCommand = System.nanoTime();
-            ScenarioPairContainer spc = getCommand(scenario, clientDescriptor.getClientState(), 0);
-            logger.log(Level.INFO, String.format("Scenario accessing time: %f ms", (double) ((System.nanoTime() - initTimeLoadCommand) * 0.000001)));
+        long initTimeLoadCommand = System.nanoTime();
+        ScenarioPairContainer spc = getCommand(scenario, clientDescriptor.getClientState(), 0);
+        logger.log(Level.INFO, String.format("Scenario accessing time: %f ms", (double) ((System.nanoTime() - initTimeLoadCommand) * 0.000001)));
 
-            if (spc == null) {
-                logger.log(Level.INFO, "Scenario executed");
-                logger.log(Level.INFO, String.format("Executing time: %s ms", System.currentTimeMillis() - initTime));
-
-                while (outputMessages.size() > 0) {
-                    try {
-                        Thread.currentThread().sleep(1000);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
+        if (spc == null) {
+            logger.log(Level.INFO, "Scenario executed");
+            logger.log(Level.INFO, String.format("Executing time: %s ms", System.currentTimeMillis() - initTime));
 
 //                stack.interrupt();
-                logger.log(Level.INFO, String.format("Done read cycles %s, write cycles %s", stack.getReadCount(), stack.getWriteCount()));
+//            logger.log(Level.INFO, String.format("Done read cycles %s, write cycles %s", stack.getReadCount(), stack.getWriteCount()));
+//
+//
+//                break;
+        }
 
-                /**
-                 * на stack не отправлена команда interrupt
-                 */
-                try {
-                    stack.join();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+        logger.log(Level.INFO, String.format("State: %s , command type: %s", Arrays.toString(clientDescriptor.getClientState()), spc.getMethod()));
+        switch (spc.getMethod()) {
+            //метод GET
+            case 0: {
+                logger.log(Level.INFO, String.format("GET: Executing command type: GET"));
+
+                inputMessage = null;
+                long startRead = System.nanoTime();
+                while (inputMessage == null) {
+                    inputMessage = inputMessages.poll();
                 }
-//                System.exit(0);
-
-                break;
-            }
-
-            logger.log(Level.INFO, String.format("State: %s , command type: %s", Arrays.toString(clientDescriptor.getClientState()), spc.getMethod()));
-            switch (spc.getMethod()) {
-                //метод GET
-                case 0: {
-                    logger.log(Level.INFO, String.format("GET: Executing command type: GET"));
-
-                    inputMessage = null;
-                    long startRead = System.nanoTime();
-                    while (inputMessage == null) {
-                        inputMessage = inputMessages.poll();
-                    }
-                    logger.log(Level.INFO, String.format("Reading time from buffer: %f ms", (double) ((System.nanoTime() - startRead) * 0.000001)));
-                    logger.log(Level.INFO, String.format("GET: Input message in hex: %s", Hex.encodeHexString(inputMessage)));
-                    if (spc.getCommand() instanceof String) {
-                        //извлекаются переменные из "компилированного" сценария
-                        for (VariablesDescriptor varDesc : (List<VariablesDescriptor>) spc.getVariables()) {
-                            switch (varDesc.getType()) {
-                                // вычленить переменную
-                                case 1: {
-                                    //запись переменной, извлеченной из полученного от клиента сообщения в ClientDescriptor
-                                    clientDescriptor.getVariableContainer()
-                                            .put(varDesc.getName(), Arrays.copyOfRange(inputMessage, varDesc.getBeginPosition(), varDesc.getBeginPosition() + varDesc.getLength()));
-                                    break;
-                                }
-                                default: {
-                                    logger.log(Level.WARNING, "Unknown command GET");
-                                    break;
-                                }
+                logger.log(Level.INFO, String.format("Reading time from buffer: %f ms", (double) ((System.nanoTime() - startRead) * 0.000001)));
+                logger.log(Level.INFO, String.format("GET: Input message in hex: %s", Hex.encodeHexString(inputMessage)));
+                if (spc.getCommand() instanceof String) {
+                    //извлекаются переменные из "компилированного" сценария
+                    for (VariablesDescriptor varDesc : (List<VariablesDescriptor>) spc.getVariables()) {
+                        switch (varDesc.getType()) {
+                            // вычленить переменную
+                            case 1: {
+                                //запись переменной, извлеченной из полученного от клиента сообщения в ClientDescriptor
+                                clientDescriptor.getVariableContainer()
+                                        .put(varDesc.getName(), Arrays.copyOfRange(inputMessage, varDesc.getBeginPosition(), varDesc.getBeginPosition() + varDesc.getLength()));
+                                break;
+                            }
+                            default: {
+                                logger.log(Level.WARNING, "Unknown command GET");
+                                break;
                             }
                         }
-                        byte[] resultMessage = assemblyMessageInByte(spc, clientDescriptor);
-                        logger.log(Level.INFO, String.format("GET: Processed message in hex: %s", Hex.encodeHexString(resultMessage)));
-                        logger.log(Level.INFO, String.format("GET: Is received message equals to processed message: %s", Arrays.equals(inputMessage, resultMessage)));
-                        break;
-                    } else if (spc.getCommand() instanceof byte[]) {
-                        byte[] resultMessage = (byte[]) spc.getCommand();
-                        logger.log(Level.INFO, String.format("GET: Loaded message in hex from scenario: %s", Hex.encodeHexString(resultMessage)));
-                        logger.log(Level.INFO, String.format("GET: Is received message equals to processed message: %s", Arrays.equals(inputMessage, resultMessage)));
-                        break;
+                    }
+                    byte[] resultMessage = assemblyMessageInByte(spc, clientDescriptor);
+                    logger.log(Level.INFO, String.format("GET: Processed message in hex: %s", Hex.encodeHexString(resultMessage)));
+                    logger.log(Level.INFO, String.format("GET: Is received message equals to processed message: %s", Arrays.equals(inputMessage, resultMessage)));
+                    break;
+                } else if (spc.getCommand() instanceof byte[]) {
+                    byte[] resultMessage = (byte[]) spc.getCommand();
+                    logger.log(Level.INFO, String.format("GET: Loaded message in hex from scenario: %s", Hex.encodeHexString(resultMessage)));
+                    logger.log(Level.INFO, String.format("GET: Is received message equals to processed message: %s", Arrays.equals(inputMessage, resultMessage)));
+                    break;
+                }
+            }
+            //метод PUT
+            case 1: {
+                logger.log(Level.INFO, String.format("PUT: Executing command type: PUT"));
+                for (VariablesDescriptor varDesc : (List<VariablesDescriptor>) spc.getVariables()) {
+                    if (varDesc.getType() == 3) {
+                        //сгенерировать переменную по имени
+                        byte[] var = null;
+                        if (varDesc.getName().equals("ICMCentralControllerTimer"))
+                            var = ByteBuffer.allocate(varDesc.getLength()).putInt((int) (System.currentTimeMillis() / 1000)).array();
+                        clientDescriptor.getVariableContainer().put(varDesc.getName(), var);
+                        logger.log(Level.INFO, String.format("TIME IN HEX: " + Hex.encodeHexString(var)));
                     }
                 }
-                //метод PUT
-                case 1: {
-                    logger.log(Level.INFO, String.format("PUT: Executing command type: PUT"));
-                    for (VariablesDescriptor varDesc : (List<VariablesDescriptor>) spc.getVariables()) {
-                        if (varDesc.getType() == 3) {
-                            //сгенерировать переменную по имени
-                            byte[] var = null;
-                            if (varDesc.getName().equals("ICMCentralControllerTimer"))
-                                var = ByteBuffer.allocate(varDesc.getLength()).putInt((int) (System.currentTimeMillis() / 1000)).array();
-                            clientDescriptor.getVariableContainer().put(varDesc.getName(), var);
-                            logger.log(Level.INFO, String.format("TIME IN HEX: " + Hex.encodeHexString(var)));
-                        }
-                    }
                     /*проверяет, если команда представлена в сценарии в byte[], она извлекаетя из сценария.
                     в ином случае команда собирается изх переменных и блоков, представленый в byte[]
                     */
-                    byte[] resultMessage;
-                    if (spc.getCommand() instanceof byte[]) {
-                        resultMessage = (byte[]) spc.getCommand();
-                        logger.log(Level.INFO, String.format("PUT: Processed message in hex: %s", Hex.encodeHexString(resultMessage)));
-                    } else {
-                        resultMessage = assemblyMessageInByte(spc, clientDescriptor);
-                        logger.log(Level.INFO, String.format("PUT: Processed message in hex: %s", Hex.encodeHexString(resultMessage)));
-                    }
+                byte[] resultMessage;
+                if (spc.getCommand() instanceof byte[]) {
+                    resultMessage = (byte[]) spc.getCommand();
+                    logger.log(Level.INFO, String.format("PUT: Processed message in hex: %s", Hex.encodeHexString(resultMessage)));
+                } else {
+                    resultMessage = assemblyMessageInByte(spc, clientDescriptor);
+                    logger.log(Level.INFO, String.format("PUT: Processed message in hex: %s", Hex.encodeHexString(resultMessage)));
+                }
 
-                    long startWrite = System.nanoTime();
-                    outputMessages.add(resultMessage);
-                    logger.log(Level.INFO, String.format("Writing time to buffer: %f ms", (double) ((System.nanoTime() - startWrite) * 0.000001)));
-                    logger.log(Level.INFO, String.format("PUT: Sent message"));
-                    break;
-                }
-                default: {
-                    logger.log(Level.WARNING, String.valueOf("Unknown command in scenario"));
-                    break;
-                }
+                long startWrite = System.nanoTime();
+                outputMessages.add(resultMessage);
+                logger.log(Level.INFO, String.format("Writing time to buffer: %f ms", (double) ((System.nanoTime() - startWrite) * 0.000001)));
+                logger.log(Level.INFO, String.format("PUT: Sent message"));
+                break;
+            }
+            default: {
+                logger.log(Level.WARNING, String.valueOf("Unknown command in scenario"));
+                break;
             }
         }
-        setBusy(false);
-
     }
+
 }
+
